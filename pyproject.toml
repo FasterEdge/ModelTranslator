@@ -1,0 +1,51 @@
+[project]
+name = "model-translator"
+version = "0.1.0"
+description = "多格式模型转换工具：支持 PyTorch / ONNX / TensorFlow / OpenVINO / CoreML 等常见格式互转，转换全部调用已有成熟库"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "click>=8.1",
+    "filetype>=1.2",
+]
+
+[project.optional-dependencies]
+# 按需安装的转换后端：uv sync --extra <name> 或 --all-extras
+torch = [
+    "torch>=2.0",
+]
+onnx = [
+    "onnx>=1.14",
+    "onnxruntime>=1.16",
+    "onnxscript>=0.1",
+]
+tensorflow = [
+    "tensorflow>=2.12",
+    "tf2onnx>=1.15",
+]
+openvino = [
+    "openvino>=2023.0",
+]
+coreml = [
+    "coremltools>=7.0",
+]
+all = [
+    "torch>=2.0",
+    "onnx>=1.14",
+    "onnxruntime>=1.16",
+    "onnxscript>=0.1",
+    "tensorflow>=2.12",
+    "tf2onnx>=1.15",
+    "openvino>=2023.0",
+    "coremltools>=7.0",
+]
+
+[project.scripts]
+model-translator = "model_translator.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/model_translator"]

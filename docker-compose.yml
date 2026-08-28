@@ -1,0 +1,8 @@
+services:
+  translator:
+    build: .
+    image: model-translator
+    volumes:
+      - .:/workspace
+    entrypoint: model-translator
+    command: list

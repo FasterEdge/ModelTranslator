@@ -1,6 +1,10 @@
 services:
   translator:
-    build: .
+    build:
+      context: .
+      args:
+        # 按需选择要安装的依赖分组（空格分隔），如 "onnx openvino"
+        UV_EXTRAS: ${UV_EXTRAS:-onnx}
     image: model-translator
     volumes:
       - .:/workspace

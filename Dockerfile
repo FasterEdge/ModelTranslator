@@ -1,18 +1,21 @@
 # ModelTranslator Docker 镜像
-# 构建: docker build -t model-translator .
-# 依赖按需安装：默认装基础 + ONNX 相关（轻量），通过 --build-arg 扩展
+# =====================================================================
+# 构建（依赖按需安装，默认仅 ONNX 后端，体积轻量）：
+#   docker build -t model-translator .
 #
-# 示例：
-#   docker build --build-arg UV_EXTRAS="onnx openvino" -t model-translator .
-#   docker build --build-arg UV_EXTRAS="all" -t model-translator-full .   # 全部后端
+# 按需组合后端（空格分隔多个分组）：
+#   docker build --build-arg 'UV_EXTRAS=onnx openvino' -t model-translator .
+#
+# 全部后端（体积很大，一般不需要）：
+#   docker build --build-arg 'UV_EXTRAS=all' -t model-translator-full .
+# =====================================================================
 
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
-# ===== 构建参数：按需选择要安装的依赖分组 =====
+# 构建参数：按需选择要安装的依赖分组（对应 pyproject.toml 的 optional-dependencies）
 ARG UV_EXTRAS="onnx"
-# 按空格分隔传多个：--build-arg 'UV_EXTRAS=onnx openvino'
 
-# ===== 系统依赖（TensorFlow/OpenCV 等需要）=====
+# ===== 系统依赖（TensorFlow / OpenCV / coremltools 等需要）=====
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
@@ -28,7 +31,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 
 # ===== 按需安装转换后端 + 项目自身 =====
-# 用 shell 把 UV_EXTRAS 转成 uv sync 的 --extra 参数
+# 把 UV_EXTRAS（空格分隔）转成 uv sync 的多个 --extra 参数
 RUN set -eux; \
     if [ -z "$UV_EXTRAS" ]; then \
         uv sync --no-dev; \

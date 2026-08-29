@@ -1,6 +1,6 @@
 [project]
 name = "model-translator"
-version = "0.1.0"
+version = "1.0.20260829"
 description = "多格式模型转换工具：支持 PyTorch / ONNX / TensorFlow / OpenVINO / CoreML 等常见格式互转，转换全部调用已有成熟库"
 readme = "README.md"
 requires-python = ">=3.9"

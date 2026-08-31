@@ -1,3 +1,4 @@
+# FasterEdge 开源项目 · https://github.com/FasterEdge · https://gitee.com/FasterEdge
 """model-translator 命令行入口。
 
 用法示例:

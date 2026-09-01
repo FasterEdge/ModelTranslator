@@ -1,3 +1,8 @@
+# ─────────────────────────────────────────────────────────────
+# FasterEdge 开源项目
+# Github: https://github.com/FasterEdge
+# Gitee:  https://gitee.com/FasterEdge
+# ─────────────────────────────────────────────────────────────
 """model_translator - 多格式模型转换工具。
 
 转换全部委托给已有的成熟库（torch / onnx / tensorflow / tf2onnx /

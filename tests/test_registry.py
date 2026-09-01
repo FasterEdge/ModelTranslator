@@ -1,3 +1,8 @@
+# ─────────────────────────────────────────────────────────────
+# FasterEdge 开源项目
+# Github: https://github.com/FasterEdge
+# Gitee:  https://gitee.com/FasterEdge
+# ─────────────────────────────────────────────────────────────
 """registry / cli 基础逻辑测试（不依赖重库）。"""
 
 import sys

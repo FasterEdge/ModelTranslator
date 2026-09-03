@@ -65,6 +65,32 @@ def test_list_conversions_nonempty():
     assert len(list_conversions()) >= 10
 
 
+def test_find_project_dir_finds_pyproject():
+    from model_translator.cli import _find_project_dir
+
+    root = _find_project_dir()
+    assert root is not None, "应在当前目录或模块位置的祖先中找到项目根"
+    assert (root / "pyproject.toml").is_file()
+
+
+def test_find_project_dir_ignores_foreign_cwd():
+    """在无关目录(如容器挂载的 /workspace)执行时, 仍能定位到项目根。"""
+    import os
+    import tempfile
+
+    from model_translator.cli import _find_project_dir
+
+    old = os.getcwd()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            os.chdir(d)
+            root = _find_project_dir()
+            assert root is not None
+            assert (root / "pyproject.toml").is_file()
+    finally:
+        os.chdir(old)
+
+
 if __name__ == "__main__":
     # 无 pytest 依赖的简单运行：逐个执行 test_* 函数
     failures = 0

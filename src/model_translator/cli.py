@@ -175,6 +175,11 @@ def _run_with_auto_install(conv, src, dst, kwargs, auto_install):
         if not groups:
             raise
         cmd = ["uv", "sync"] + [a for g in groups for a in ("--extra", g)]
+        project_dir = _find_project_dir()
+        if project_dir is not None:
+            # 容器/任意 cwd 场景下项目不在当前目录(如镜像 WORKDIR /workspace),
+            # 必须显式指定项目根, 否则 uv sync 报 No pyproject.toml found。
+            cmd += ["--project", str(project_dir)]
         click.echo(f"缺少依赖，正在按需安装: {' '.join(cmd)} ...")
         import subprocess
         proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -184,6 +189,21 @@ def _run_with_auto_install(conv, src, dst, kwargs, auto_install):
             )
         click.echo("依赖安装完成，重试转换 ...")
         return conv.fn(src, dst, **kwargs)
+
+
+def _find_project_dir() -> Optional[Path]:
+    """向上查找含 pyproject.toml 的项目根目录。"""
+    # 1) 从当前目录向上找
+    cur = Path.cwd()
+    for p in (cur, *cur.parents):
+        if (p / "pyproject.toml").is_file():
+            return p
+    # 2) 从本模块位置向上找（打包安装场景）
+    here = Path(__file__).resolve()
+    for p in (here, *here.parents):
+        if (p / "pyproject.toml").is_file():
+            return p
+    return None
 
 
 def _fmt_size(n: int) -> str:

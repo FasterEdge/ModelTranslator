@@ -11,7 +11,7 @@ jobs:
   docker-build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: '构建 Docker 镜像'
       run: |
         docker build -t model-translator .

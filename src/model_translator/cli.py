@@ -191,7 +191,7 @@ def _run_with_auto_install(conv, src, dst, kwargs, auto_install):
         return conv.fn(src, dst, **kwargs)
 
 
-def _find_project_dir() -> Optional[Path]:
+def _find_project_dir() -> Path | None:
     """向上查找含 pyproject.toml 的项目根目录。"""
     # 1) 从当前目录向上找
     cur = Path.cwd()

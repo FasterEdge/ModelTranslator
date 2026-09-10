@@ -41,6 +41,28 @@ def _import(name: str, pip_name: str | None = None):
         ) from e
 
 
+def _normalize_input_shape(raw) -> tuple[int, ...] | None:
+    """把 --input-shape 归一为整数元组(兼容 str "1,3,224,224" 与 tuple/int 列表)。
+    非法输入抛 ConversionError, 避免 int() ValueError 裸 traceback。"""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, str):
+        try:
+            parts = tuple(int(x.strip()) for x in raw.split(","))
+        except ValueError as e:
+            raise ConversionError(
+                f"无效的 input_shape: {raw!r} (应为逗号分隔的整数, 如 1,3,224,224)"
+            ) from e
+    else:
+        try:
+            parts = tuple(int(x) for x in raw)
+        except (TypeError, ValueError) as e:
+            raise ConversionError(f"无效的 input_shape: {raw!r}") from e
+    if not parts or any(n <= 0 for n in parts):
+        raise ConversionError(f"无效的 input_shape: {raw!r} (维度必须为正整数)")
+    return parts
+
+
 # ================= PyTorch -> ONNX / TorchScript =================
 
 
@@ -50,14 +72,14 @@ def convert_pytorch_to_onnx(src: Path, dst: Path, **kwargs) -> Path:
     # 加载模型：兼容完整模型 / state_dict / 自定义脚本三种
     model = _load_pytorch_model(torch, src, kwargs)
     # 动态输入：需要用户提供示例输入 shape
-    input_shape = kwargs.get("input_shape") or kwargs.get("shape")
+    input_shape = _normalize_input_shape(kwargs.get("input_shape") or kwargs.get("shape"))
     opset = int(kwargs.get("opset", 13))
     if input_shape is None:
         raise ConversionError(
             "PyTorch->ONNX 需要示例输入，请通过 --input-shape 指定，"
             "例如 --input-shape '1,3,224,224'"
         )
-    dummy = torch.randn(*[int(x) for x in str(input_shape).split(",")])
+    dummy = torch.randn(*input_shape)
     model.eval()
     torch.onnx.export(
         model, dummy, str(dst),
@@ -74,9 +96,9 @@ def convert_pytorch_to_torchscript(src: Path, dst: Path, **kwargs) -> Path:
     _ensure_parent(dst)
     model = _load_pytorch_model(torch, src, kwargs)
     model.eval()
-    input_shape = kwargs.get("input_shape") or kwargs.get("shape")
+    input_shape = _normalize_input_shape(kwargs.get("input_shape") or kwargs.get("shape"))
     if input_shape is not None:
-        dummy = torch.randn(*[int(x) for x in str(input_shape).split(",")])
+        dummy = torch.randn(*input_shape)
         traced = torch.jit.trace(model, dummy)
         traced.save(str(dst))
     else:
@@ -147,7 +169,7 @@ def convert_onnx_to_tensorrt(src: Path, dst: Path, **kwargs) -> Path:
         cmd.append("--fp16")
     if kwargs.get("int8"):
         cmd.append("--int8")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise ConversionError(f"trtexec 失败: {result.stderr[-2000:]}")
     return dst
@@ -220,7 +242,7 @@ def convert_safetensors_to_gguf(src: Path, dst: Path, **kwargs) -> Path:
             "未找到 convert_hf_to_gguf.py，请安装 llama.cpp 并加入 PATH"
         )
     cmd = ["python3", script, str(src), "--outfile", str(dst)]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise ConversionError(f"GGUF 转换失败: {result.stderr[-2000:]}")
     return dst

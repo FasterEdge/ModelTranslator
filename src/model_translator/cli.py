@@ -25,7 +25,6 @@ from .registry import (
     list_conversions,
 )
 
-
 # 常见格式 key 别名（便于 --to 参数）
 KEY_ALIASES = {
     "pt": "pytorch",
@@ -50,6 +49,23 @@ KEY_ALIASES = {
 def resolve_key(name: str) -> str:
     key = name.lower()
     return KEY_ALIASES.get(key, key)
+
+
+def _parse_input_shape(raw: str | None) -> tuple[int, ...] | None:
+    """解析 --input-shape "1,3,224,224" 为整数元组; 非法输入给出友好错误(而非 raw traceback)。"""
+    if not raw:
+        return None
+    try:
+        parts = tuple(int(x.strip()) for x in raw.split(","))
+    except ValueError:
+        raise click.UsageError(
+            f"无效的 --input-shape: {raw!r} (应为逗号分隔的整数, 如 1,3,224,224)"
+        )
+    if not parts or any(n <= 0 for n in parts):
+        raise click.UsageError(
+            f"无效的 --input-shape: {raw!r} (维度必须为正整数)"
+        )
+    return parts
 
 
 @click.group()
@@ -130,7 +146,7 @@ def convert(src: Path, dst: Path, to, input_shape, opset, input_names,
         sys.exit(2)
 
     kwargs = {
-        "input_shape": input_shape,
+        "input_shape": _parse_input_shape(input_shape),
         "opset": opset,
         "input_names": input_names.split(",") if input_names else None,
         "output_names": output_names.split(",") if output_names else None,
@@ -182,7 +198,7 @@ def _run_with_auto_install(conv, src, dst, kwargs, auto_install):
             cmd += ["--project", str(project_dir)]
         click.echo(f"缺少依赖，正在按需安装: {' '.join(cmd)} ...")
         import subprocess
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if proc.returncode != 0:
             raise MissingDependencyError(
                 f"按需安装失败: {proc.stderr.strip()[-500:]}"

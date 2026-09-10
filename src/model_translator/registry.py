@@ -16,7 +16,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 # 转换函数签名：fn(src: Path, dst: Path, **kwargs) -> Path
 ConverterFn = Callable[[Path, Path], Path]
@@ -93,7 +93,7 @@ for _fmt in FORMATS.values():
             EXT_TO_FORMAT[_ext] = _fmt.key
 
 
-def detect_format(path: Path) -> Optional[str]:
+def detect_format(path: Path) -> str | None:
     """根据路径/扩展名识别格式 key。目录按 SavedModel 处理。"""
     if path.is_dir():
         return "tensorflow"
@@ -117,7 +117,7 @@ def _ensure_conversions_loaded() -> None:
         _conv.register_all(sys.modules[__name__])
 
 
-def find_conversion(src: str, dst: str) -> Optional[Conversion]:
+def find_conversion(src: str, dst: str) -> Conversion | None:
     _ensure_conversions_loaded()
     for c in CONVERSIONS:
         if c.src_format == src and c.dst_format == dst:

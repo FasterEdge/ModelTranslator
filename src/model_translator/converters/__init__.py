@@ -41,6 +41,20 @@ def _import(name: str, pip_name: str | None = None):
         ) from e
 
 
+def _safe_keras_load(load, path: str):
+    """加载 Keras 模型: Keras 3 / TF 2.16+ 强制 safe_mode=True, 阻止恶意
+    .h5/.keras 经 Lambda 层在加载阶段执行任意代码(RCE)。TF 2.12-2.15 的
+    tf.keras 无 safe_mode 参数, 保持原行为(仅加载可信模型)。"""
+    import inspect
+
+    try:
+        if "safe_mode" in inspect.signature(load).parameters:
+            return load(path, safe_mode=True)
+    except (TypeError, ValueError):
+        pass
+    return load(path)
+
+
 def _normalize_input_shape(raw) -> tuple[int, ...] | None:
     """把 --input-shape 归一为整数元组(兼容 str "1,3,224,224" 与 tuple/int 列表)。
     非法输入抛 ConversionError, 避免 int() ValueError 裸 traceback。"""
@@ -200,7 +214,7 @@ def convert_tf_to_tflite(src: Path, dst: Path, **kwargs) -> Path:
     if src.is_dir():
         return _convert(tf.lite.TFLiteConverter.from_saved_model(str(src)))
     # .h5 / .keras
-    model = tf.keras.models.load_model(str(src))
+    model = _safe_keras_load(tf.keras.models.load_model, str(src))
     return _convert(tf.lite.TFLiteConverter.from_keras_model(model))
 
 
@@ -214,7 +228,7 @@ def convert_tf_to_onnx(src: Path, dst: Path, **kwargs) -> Path:
         import tf2onnx.convert
         tf2onnx.convert.from_saved_model(str(src), output_path=str(dst))
     else:
-        model = tf.keras.models.load_model(str(src))
+        model = _safe_keras_load(tf.keras.models.load_model, str(src))
         import tf2onnx.convert
         tf2onnx.convert.from_keras(model, output_path=str(dst))
     return dst

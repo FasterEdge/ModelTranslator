@@ -126,7 +126,14 @@ def _load_pytorch_model(torch, src: Path, kwargs):
             raise ConversionError("--script 脚本必须定义 load_model(path) 函数")
         return loader(str(src))
 
-    ckpt = torch.load(str(src), map_location="cpu", weights_only=False)
+    # 安全: 默认 weights_only=True 拒绝 pickle 反序列化——恶意 .pt/.pth 可经
+    # __reduce__ 钩子在加载阶段执行任意代码(RCE)。仅当用户显式传入 allow_pickle
+    # 且确认模型可信时才允许反序列化完整 nn.Module 对象。
+    ckpt = torch.load(
+        str(src),
+        map_location="cpu",
+        weights_only=not kwargs.get("allow_pickle", False),
+    )
     if isinstance(ckpt, dict) and ("state_dict" in ckpt or "model" in ckpt):
         raise ConversionError(
             "检测到 state_dict 权重，需要模型结构定义。"

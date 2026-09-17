@@ -118,10 +118,12 @@ def show_info(path):
               help="TFLite 量化方式")
 @click.option("--script", default=None, type=click.Path(exists=True, path_type=Path),
               help="自定义 Python 脚本，用于加载 PyTorch 模型（定义 load_model() 返回模型）")
+@click.option("--allow-pickle", default=False, is_flag=True,
+              help="允许用 pickle 反序列化完整 PyTorch 模型(不安全, 仅对可信模型使用)")
 @click.option("--auto-install", default=False, is_flag=True,
               help="缺少依赖时自动按需安装（uv sync --extra <所需分组>）")
 def convert(src: Path, dst: Path, to, input_shape, opset, input_names,
-            output_names, dynamic_axes, fp16, quantize, script, auto_install):
+            output_names, dynamic_axes, fp16, quantize, script, allow_pickle, auto_install):
     """模型转换: model-translator convert <src> <dst>"""
     src_key = detect_format(src)
     if src_key is None:
@@ -153,6 +155,7 @@ def convert(src: Path, dst: Path, to, input_shape, opset, input_names,
         "dynamic_axes": dynamic_axes,
         "fp16": fp16,
         "quantize": quantize,
+        "allow_pickle": allow_pickle,
     }
     if script:
         kwargs["script"] = script

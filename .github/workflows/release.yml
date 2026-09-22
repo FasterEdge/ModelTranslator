@@ -24,7 +24,7 @@ jobs:
     name: '打包源码并发布 Release'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: '校验版本号与发布标签一致'
         shell: bash

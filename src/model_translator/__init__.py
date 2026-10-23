@@ -9,4 +9,4 @@
 openvino / coremltools 等），本项目只做格式识别与转换编排。
 """
 
-__version__ = "1.0.20260922"
+__version__ = "1.0.20261022"

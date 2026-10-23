@@ -41,6 +41,42 @@ def _import(name: str, pip_name: str | None = None):
         ) from e
 
 
+def _safe_keras_load(load, path: str):
+    """加载 Keras 模型: Keras 3 / TF 2.16+ 强制 safe_mode=True, 阻止恶意
+    .h5/.keras 经 Lambda 层在加载阶段执行任意代码(RCE)。TF 2.12-2.15 的
+    tf.keras 无 safe_mode 参数, 保持原行为(仅加载可信模型)。"""
+    import inspect
+
+    try:
+        if "safe_mode" in inspect.signature(load).parameters:
+            return load(path, safe_mode=True)
+    except (TypeError, ValueError):
+        pass
+    return load(path)
+
+
+def _normalize_input_shape(raw) -> tuple[int, ...] | None:
+    """把 --input-shape 归一为整数元组(兼容 str "1,3,224,224" 与 tuple/int 列表)。
+    非法输入抛 ConversionError, 避免 int() ValueError 裸 traceback。"""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, str):
+        try:
+            parts = tuple(int(x.strip()) for x in raw.split(","))
+        except ValueError as e:
+            raise ConversionError(
+                f"无效的 input_shape: {raw!r} (应为逗号分隔的整数, 如 1,3,224,224)"
+            ) from e
+    else:
+        try:
+            parts = tuple(int(x) for x in raw)
+        except (TypeError, ValueError) as e:
+            raise ConversionError(f"无效的 input_shape: {raw!r}") from e
+    if not parts or any(n <= 0 for n in parts):
+        raise ConversionError(f"无效的 input_shape: {raw!r} (维度必须为正整数)")
+    return parts
+
+
 # ================= PyTorch -> ONNX / TorchScript =================
 
 
@@ -50,14 +86,14 @@ def convert_pytorch_to_onnx(src: Path, dst: Path, **kwargs) -> Path:
     # 加载模型：兼容完整模型 / state_dict / 自定义脚本三种
     model = _load_pytorch_model(torch, src, kwargs)
     # 动态输入：需要用户提供示例输入 shape
-    input_shape = kwargs.get("input_shape") or kwargs.get("shape")
+    input_shape = _normalize_input_shape(kwargs.get("input_shape") or kwargs.get("shape"))
     opset = int(kwargs.get("opset", 13))
     if input_shape is None:
         raise ConversionError(
             "PyTorch->ONNX 需要示例输入，请通过 --input-shape 指定，"
             "例如 --input-shape '1,3,224,224'"
         )
-    dummy = torch.randn(*[int(x) for x in str(input_shape).split(",")])
+    dummy = torch.randn(*input_shape)
     model.eval()
     torch.onnx.export(
         model, dummy, str(dst),
@@ -74,9 +110,9 @@ def convert_pytorch_to_torchscript(src: Path, dst: Path, **kwargs) -> Path:
     _ensure_parent(dst)
     model = _load_pytorch_model(torch, src, kwargs)
     model.eval()
-    input_shape = kwargs.get("input_shape") or kwargs.get("shape")
+    input_shape = _normalize_input_shape(kwargs.get("input_shape") or kwargs.get("shape"))
     if input_shape is not None:
-        dummy = torch.randn(*[int(x) for x in str(input_shape).split(",")])
+        dummy = torch.randn(*input_shape)
         traced = torch.jit.trace(model, dummy)
         traced.save(str(dst))
     else:
@@ -104,7 +140,14 @@ def _load_pytorch_model(torch, src: Path, kwargs):
             raise ConversionError("--script 脚本必须定义 load_model(path) 函数")
         return loader(str(src))
 
-    ckpt = torch.load(str(src), map_location="cpu", weights_only=False)
+    # 安全: 默认 weights_only=True 拒绝 pickle 反序列化——恶意 .pt/.pth 可经
+    # __reduce__ 钩子在加载阶段执行任意代码(RCE)。仅当用户显式传入 allow_pickle
+    # 且确认模型可信时才允许反序列化完整 nn.Module 对象。
+    ckpt = torch.load(
+        str(src),
+        map_location="cpu",
+        weights_only=not kwargs.get("allow_pickle", False),
+    )
     if isinstance(ckpt, dict) and ("state_dict" in ckpt or "model" in ckpt):
         raise ConversionError(
             "检测到 state_dict 权重，需要模型结构定义。"
@@ -147,7 +190,7 @@ def convert_onnx_to_tensorrt(src: Path, dst: Path, **kwargs) -> Path:
         cmd.append("--fp16")
     if kwargs.get("int8"):
         cmd.append("--int8")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise ConversionError(f"trtexec 失败: {result.stderr[-2000:]}")
     return dst
@@ -171,7 +214,7 @@ def convert_tf_to_tflite(src: Path, dst: Path, **kwargs) -> Path:
     if src.is_dir():
         return _convert(tf.lite.TFLiteConverter.from_saved_model(str(src)))
     # .h5 / .keras
-    model = tf.keras.models.load_model(str(src))
+    model = _safe_keras_load(tf.keras.models.load_model, str(src))
     return _convert(tf.lite.TFLiteConverter.from_keras_model(model))
 
 
@@ -185,7 +228,7 @@ def convert_tf_to_onnx(src: Path, dst: Path, **kwargs) -> Path:
         import tf2onnx.convert
         tf2onnx.convert.from_saved_model(str(src), output_path=str(dst))
     else:
-        model = tf.keras.models.load_model(str(src))
+        model = _safe_keras_load(tf.keras.models.load_model, str(src))
         import tf2onnx.convert
         tf2onnx.convert.from_keras(model, output_path=str(dst))
     return dst
@@ -220,7 +263,7 @@ def convert_safetensors_to_gguf(src: Path, dst: Path, **kwargs) -> Path:
             "未找到 convert_hf_to_gguf.py，请安装 llama.cpp 并加入 PATH"
         )
     cmd = ["python3", script, str(src), "--outfile", str(dst)]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise ConversionError(f"GGUF 转换失败: {result.stderr[-2000:]}")
     return dst

@@ -25,7 +25,6 @@ from .registry import (
     list_conversions,
 )
 
-
 # 常见格式 key 别名（便于 --to 参数）
 KEY_ALIASES = {
     "pt": "pytorch",
@@ -50,6 +49,23 @@ KEY_ALIASES = {
 def resolve_key(name: str) -> str:
     key = name.lower()
     return KEY_ALIASES.get(key, key)
+
+
+def _parse_input_shape(raw: str | None) -> tuple[int, ...] | None:
+    """解析 --input-shape "1,3,224,224" 为整数元组; 非法输入给出友好错误(而非 raw traceback)。"""
+    if not raw:
+        return None
+    try:
+        parts = tuple(int(x.strip()) for x in raw.split(","))
+    except ValueError:
+        raise click.UsageError(
+            f"无效的 --input-shape: {raw!r} (应为逗号分隔的整数, 如 1,3,224,224)"
+        )
+    if not parts or any(n <= 0 for n in parts):
+        raise click.UsageError(
+            f"无效的 --input-shape: {raw!r} (维度必须为正整数)"
+        )
+    return parts
 
 
 @click.group()
@@ -102,10 +118,12 @@ def show_info(path):
               help="TFLite 量化方式")
 @click.option("--script", default=None, type=click.Path(exists=True, path_type=Path),
               help="自定义 Python 脚本，用于加载 PyTorch 模型（定义 load_model() 返回模型）")
+@click.option("--allow-pickle", default=False, is_flag=True,
+              help="允许用 pickle 反序列化完整 PyTorch 模型(不安全, 仅对可信模型使用)")
 @click.option("--auto-install", default=False, is_flag=True,
               help="缺少依赖时自动按需安装（uv sync --extra <所需分组>）")
 def convert(src: Path, dst: Path, to, input_shape, opset, input_names,
-            output_names, dynamic_axes, fp16, quantize, script, auto_install):
+            output_names, dynamic_axes, fp16, quantize, script, allow_pickle, auto_install):
     """模型转换: model-translator convert <src> <dst>"""
     src_key = detect_format(src)
     if src_key is None:
@@ -130,13 +148,14 @@ def convert(src: Path, dst: Path, to, input_shape, opset, input_names,
         sys.exit(2)
 
     kwargs = {
-        "input_shape": input_shape,
+        "input_shape": _parse_input_shape(input_shape),
         "opset": opset,
         "input_names": input_names.split(",") if input_names else None,
         "output_names": output_names.split(",") if output_names else None,
         "dynamic_axes": dynamic_axes,
         "fp16": fp16,
         "quantize": quantize,
+        "allow_pickle": allow_pickle,
     }
     if script:
         kwargs["script"] = script
@@ -182,7 +201,7 @@ def _run_with_auto_install(conv, src, dst, kwargs, auto_install):
             cmd += ["--project", str(project_dir)]
         click.echo(f"缺少依赖，正在按需安装: {' '.join(cmd)} ...")
         import subprocess
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if proc.returncode != 0:
             raise MissingDependencyError(
                 f"按需安装失败: {proc.stderr.strip()[-500:]}"
@@ -191,7 +210,7 @@ def _run_with_auto_install(conv, src, dst, kwargs, auto_install):
         return conv.fn(src, dst, **kwargs)
 
 
-def _find_project_dir() -> Optional[Path]:
+def _find_project_dir() -> Path | None:
     """向上查找含 pyproject.toml 的项目根目录。"""
     # 1) 从当前目录向上找
     cur = Path.cwd()

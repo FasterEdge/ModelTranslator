@@ -80,15 +80,15 @@ def test_find_project_dir_ignores_foreign_cwd():
 
     from model_translator.cli import _find_project_dir
 
-    old = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory() as d:
+        old = os.getcwd()
+        try:
             os.chdir(d)
             root = _find_project_dir()
             assert root is not None
             assert (root / "pyproject.toml").is_file()
-    finally:
-        os.chdir(old)
+        finally:
+            os.chdir(old)
 
 
 if __name__ == "__main__":

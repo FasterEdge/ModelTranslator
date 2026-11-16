@@ -1,9 +1,9 @@
 [project]
 name = "model-translator"
-version = "1.0.20261022"
+version = "1.0.20261116"
 description = "多格式模型转换工具：支持 PyTorch / ONNX / TensorFlow / OpenVINO / CoreML 等常见格式互转，转换全部调用已有成熟库"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
     "filetype>=1.2",
@@ -12,32 +12,32 @@ dependencies = [
 [project.optional-dependencies]
 # 按需安装的转换后端：uv sync --extra <name> 或 --all-extras
 torch = [
-    "torch>=2.0",
+    "torch>=2.15.0",
 ]
 onnx = [
-    "onnx>=1.14",
-    "onnxruntime>=1.16",
-    "onnxscript>=0.1",
+    "onnx>=1.23.2",
+    "onnxruntime>=1.32.0",
+    "onnxscript>=0.7.2",
 ]
 tensorflow = [
-    "tensorflow>=2.12",
-    "tf2onnx>=1.15",
+    "tensorflow>=2.21.0",
+    "tf2onnx>=1.17.0",
 ]
 openvino = [
-    "openvino>=2023.0",
+    "openvino>=2026.4.1",
 ]
 coreml = [
-    "coremltools>=7.0",
+    "coremltools>=9.0",
 ]
 all = [
-    "torch>=2.0",
-    "onnx>=1.14",
-    "onnxruntime>=1.16",
-    "onnxscript>=0.1",
-    "tensorflow>=2.12",
-    "tf2onnx>=1.15",
-    "openvino>=2023.0",
-    "coremltools>=7.0",
+    "torch>=2.15.0",
+    "onnx>=1.23.2",
+    "onnxruntime>=1.32.0",
+    "onnxscript>=0.7.2",
+    "tensorflow>=2.21.0",
+    "tf2onnx>=1.17.0",
+    "openvino>=2026.4.1",
+    "coremltools>=9.0",
 ]
 
 [project.scripts]

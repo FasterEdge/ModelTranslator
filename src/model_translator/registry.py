@@ -14,9 +14,9 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 # 转换函数签名：fn(src: Path, dst: Path, **kwargs) -> Path
 ConverterFn = Callable[[Path, Path], Path]

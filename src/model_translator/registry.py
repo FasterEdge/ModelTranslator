@@ -101,7 +101,7 @@ def register_format(key: str, name: str, extensions: tuple[str, ...], descriptio
 FMT_PYTORCH = register_format("pytorch", "PyTorch", (".pt", ".pth"),
                               "PyTorch 权重/状态字典或完整模型")
 FMT_TORCHSCRIPT = register_format("torchscript", "TorchScript", (".pt",),
-                                  "TorchScript 序列化模型（需 --dst-key torchscript 区分）")
+                                  "TorchScript 序列化模型（与 pytorch 同用 .pt，需 --to torchscript 显式指定）")
 FMT_ONNX = register_format("onnx", "ONNX", (".onnx",),
                            "Open Neural Network Exchange 标准格式")
 FMT_TENSORFLOW = register_format("tensorflow", "TensorFlow SavedModel", (".pb", ""),
@@ -118,6 +118,8 @@ FMT_COREML = register_format("coreml", "CoreML", (".mlmodel", ".mlpackage"),
                              "Apple CoreML 模型")
 FMT_GGML = register_format("ggml", "GGML/GGUF", (".gguf", ".bin"),
                            "GGUF 大语言模型格式")
+FMT_SAFETENSORS = register_format("safetensors", "Safetensors", (".safetensors",),
+                                  "HuggingFace safetensors 权重（GGUF 转换的源）")
 FMT_MINDSPORE = register_format("mindspore", "MindSpore", (".ckpt", ".mindir"),
                                 "MindSpore 模型")
 
@@ -146,12 +148,24 @@ _MAGIC_PROBES: tuple[tuple[int, bytes, str], ...] = (
 )
 
 
-def _read_head(path: Path, size: int = 8) -> bytes | None:
+def _read_head(path: Path, size: int = 64) -> bytes | None:
     try:
         with path.open("rb") as fp:
             return fp.read(size)
     except OSError:
         return None
+
+
+def _looks_like_safetensors(head: bytes) -> bool:
+    """safetensors 文件头是 8 字节小端 u64 元数据长度，随后紧跟一个 JSON 对象。
+
+    没有固定魔数，只能按"长度字段 + 紧随的 '{'"识别；长度给个上限，
+    避免把随机二进制误判成 safetensors。
+    """
+    if len(head) < 9 or head[8:9] != b"{":
+        return False
+    n = int.from_bytes(head[:8], "little")
+    return 0 < n < 64 * 1024 * 1024
 
 
 def _detect_zip_kind(path: Path) -> str | None:
@@ -203,6 +217,8 @@ def _detect(path: Path) -> tuple[str | None, str]:
             for offset, magic, key in _MAGIC_PROBES:
                 if head[offset:offset + len(magic)] == magic:
                     return key, f"魔数 {magic!r} (offset {offset})"
+            if _looks_like_safetensors(head):
+                return "safetensors", "头部 8 字节小端长度 + 紧随的 JSON 元数据对象"
             if head.startswith(_ZIP_MAGIC):
                 key = _detect_zip_kind(path)
                 if key is not None:

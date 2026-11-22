@@ -279,12 +279,19 @@ def convert_coreml_to_onnx(src: Path, dst: Path, **kwargs) -> Path:
 def convert_safetensors_to_gguf(src: Path, dst: Path, **kwargs) -> Path:
     """safetensors -> GGUF，使用 llama.cpp 的 convert_hf_to_gguf.py。"""
     _ensure_parent(dst)
-    script = shutil.which("convert_hf_to_gguf.py") or shutil.which("convert-hf-to-gguf")
+    script = (shutil.which("convert_hf_to_gguf.py")
+              or shutil.which("convert-hf-to-gguf")
+              or shutil.which("convert_hf_to_gguf"))
     if not script:
         raise MissingDependencyError(
             "未找到 convert_hf_to_gguf.py，请安装 llama.cpp 并加入 PATH"
         )
-    cmd = ["python3", script, str(src), "--outfile", str(dst)]
+    python = shutil.which("python3") or shutil.which("python")
+    if python is None:
+        raise MissingDependencyError(
+            "未找到 python3/python 解释器，无法运行 convert_hf_to_gguf.py"
+        )
+    cmd = [python, script, str(src), "--outfile", str(dst)]
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise ConversionError(f"GGUF 转换失败: {result.stderr[-2000:]}")
@@ -323,7 +330,7 @@ def register_all(reg) -> None:
                             requires=("tensorflow",), description="Keras -> ONNX")
     reg.register_conversion("coreml", "onnx", convert_coreml_to_onnx,
                             requires=("coreml",), description="CoreML -> ONNX")
-    reg.register_conversion("ggml", "ggml", convert_safetensors_to_gguf,
+    reg.register_conversion("safetensors", "ggml", convert_safetensors_to_gguf,
                             requires=(), description="safetensors -> GGUF (llama.cpp)")
 
     # 部署目标（NPU / 专用后端）路径声明

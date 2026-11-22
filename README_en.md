@@ -9,7 +9,7 @@
 
 `ModelTranslator` is a **multi-format model conversion tool** managed by [uv](https://docs.astral.sh/uv/), supporting conversion between common deep learning model formats. All conversion work is **delegated to existing mature libraries** (torch / onnx / onnxruntime / tensorflow / tf2onnx / openvino / coremltools / trtexec / llama.cpp, etc.); this project only handles format detection and conversion orchestration, without reinventing the wheel.
 
-- ✅ Supports 11+ common model formats, convertible in any combination
+- ✅ Supports **12 common model formats and 11 declared conversion paths** (not every pair); run `model-translator list` for every reachable path
 - ✅ Declares **5 deployment targets** (rknn / Ascend OM / Cambricon DLC / Horizon BPU / Apple ANE) with routing
 - ✅ Dependencies **pulled on demand**: the CLI core is only a few MB, backends installed as needed
 - ✅ `--auto-install` automatically installs missing dependencies
@@ -54,11 +54,16 @@ docker run --rm -v $(pwd):/workspace model-translator list
 | `tensorrt` | TensorRT | `.engine` `.trt` | NVIDIA inference engine |
 | `coreml` | CoreML | `.mlmodel` `.mlpackage` | Apple CoreML |
 | `ggml` | GGUF | `.gguf` `.bin` | Quantized LLM format |
+| `safetensors` | Safetensors | `.safetensors` | HuggingFace safe weights (source of the GGUF path) |
 | `mindspore` | MindSpore | `.ckpt` `.mindir` | Huawei MindSpore model |
 
 > Use `uv run model-translator info <path>` to detect the format of any file. It also
-> prints the **detection evidence** (magic bytes / zip layout / directory marker /
-> extension fallback) so you can check why it decided what it decided.
+> prints the **detection evidence** (magic bytes / zip layout / header structure /
+> directory marker / extension fallback) so you can check why it decided what it decided.
+>
+> There are **12** formats but only **11** conversion edges: not every pair of formats
+> can be converted. Reachable combinations are exactly the "conversion paths" section
+> printed by `uv run model-translator list`.
 
 ### 4. Supported Conversion Paths
 
@@ -86,7 +91,7 @@ toolchain, acquisition route and verification status.
 | `rknn` | Rockchip RKNN | Rockchip | rknn-toolkit2 | ONNX | Official wheel (not on PyPI, x86 Linux only) | **No** |
 | `om` | Ascend OM | Huawei Ascend | `atc` (CANN) | ONNX | Install CANN Toolkit, add `$ASCEND_HOME/bin` to PATH | **No** |
 | `dlc` | Cambricon DLC | Cambricon | `cnmodel` (CNToolkit) | ONNX | Install CNToolkit, add bin to PATH | **No** |
-| `bin` | Horizon BPU bin | Horizon | `hb_mapper` (OpenExplorer) | ONNX | Install OpenExplorer (horizon_tc) | **No** |
+| `bin` | Horizon BPU bin (Horizon Journey) | Horizon | `hb_mapper` (OpenExplorer) | ONNX | Install OpenExplorer (horizon_tc) | **No** |
 | `mlpackage` | CoreML mlpackage (Apple ANE) | Apple | coremltools | ONNX | `uv sync --extra coreml` | **No** (reuses onnx->coreml) |
 
 **Why "not verified"**: this repository's development environment (Windows) has no
@@ -94,6 +99,11 @@ CANN / rknn-toolkit2 / CNToolkit / OpenExplorer, so these paths **have never run
 through in this repo**. Parameters are built from each vendor's public docs; both
 `list` and `convert` state this explicitly rather than implying it works. Verify by
 actually running them in the target environment.
+
+> All 5 targets have `verified=False`, and this is not merely a documentation promise:
+> `test_no_target_claims_verified` in `tests/test_registry.py` asserts that **no target
+> may claim to be verified**. Setting `verified=True` without real evidence turns CI red
+> immediately, so the unverified status is enforced, not asserted in prose.
 
 **Routing rule**: if the source format has a direct path to the target, it is used;
 otherwise the tool first converts to the intermediate format (ONNX by default) and
@@ -158,6 +168,7 @@ uv run model-translator convert <src> <dst> [options]
 | `--fp16` | Use FP16 for TensorRT |
 | `--quantize int8` | TFLite quantization mode |
 | `--script <path>` | Custom Python script (defines `load_model(path)` returning a model) to load PyTorch state_dict |
+| `--allow-pickle` | **Off by default**: allow pickle deserialization of full PyTorch models (unsafe, trusted models only; without it `torch.load(weights_only=True)` rejects pickle so malicious `.pt` cannot run code via `__reduce__`) |
 | `--auto-install` | Auto-install missing dependencies on demand (`uv sync --extra <needed groups>`) |
 | `--opt KEY=VALUE` | Repeatable pass-through for deployment-target toolchains (see section 5) |
 | `--dry-run` | Print the route, implementations and output paths without running anything |
@@ -284,7 +295,7 @@ ModelTranslator/
 ```bash
 uv sync --extra dev           # install pytest (no conversion backend)
 uv run model-translator list
-uv run pytest -q              # identical to CI's python-test.yml
+uv run pytest -q              # pytest step matches CI's python-test.yml; CI also validates the list matrix
 ```
 
 To add a new format / conversion path:
@@ -297,7 +308,8 @@ To add a new format / conversion path:
    plus the execution function in `src/model_translator/converters/targets.py`, and
    finally `register_target_path(...)` in `register_targets()`
 5. Add tests for the new behavior and run `uv run pytest` locally (CI's
-   `python-test.yml` runs the same command)
+   `python-test.yml` runs the same pytest command, then additionally validates the
+   format × deployment-target matrix in the `list` output — all 5 target keys must appear)
 
 ### 11. Tests
 
@@ -307,13 +319,17 @@ uv run pytest -q
 ```
 
 Tests cover registry/detection logic plus vendor toolchain **argument construction**.
-None of them import torch/tensorflow or any NPU SDK, so CI needs no heavy backend:
+None of them import torch/tensorflow or any NPU SDK, so CI needs no heavy backend.
+**All 53 tests currently pass** (`53 passed`, measured on v1.0.20261123):
 
 - `detect_format` adversarial fixtures: magic bytes (GGUF `GGUF`, TFLite `TFL3`), zip
   layout (TorchScript `code/*.py`, PyTorch `data.pkl`, Keras `metadata.json`+`config.json`),
+  safetensors header (8-byte little-endian length followed by a JSON metadata object),
   directory markers (`saved_model.pb`, `Manifest.json`)
 - Target matrix and routing: all 5 targets registered, `verified` must be false, every
-  target has an `install_hint`, direct/two-step routing, no-route returns `None`
+  target has an `install_hint`, direct/two-step routing, no-route returns `None`.
+  `test_no_target_claims_verified` **enforces** the `verified=False` of all five
+  NPU/ANE targets, so an unproven path can never be claimed as verified.
 - Argument construction: `atc` strips the `.om` suffix and uses `--framework=5`, missing
   `soc_version` errors out, rknn disables quantization without a calibration set,
   `cnmodel`/`hb_mapper` arguments, trtexec's min/opt/max shapes

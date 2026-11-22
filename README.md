@@ -9,7 +9,7 @@
 
 `ModelTranslator` 是一个基于 [uv](https://docs.astral.sh/uv/) 管理的 **多格式模型转换工具**，支持常见深度学习模型格式之间的互转。转换过程**全部委托给已有的成熟库**（torch / onnx / onnxruntime / tensorflow / tf2onnx / openvino / coremltools / trtexec / llama.cpp 等），本项目只负责格式识别与转换编排，不重复造轮子。
 
-- ✅ 支持 11+ 常见模型格式，任意组合互转
+- ✅ 支持 **12 种常见模型格式、11 条已声明转换路径**（非任意组合互转）；用 `model-translator list` 可查看全部可达路径
 - ✅ 支持 **5 个部署目标**（rknn / Ascend OM / Cambricon DLC / 地平线 BPU / Apple ANE）的路径声明与路由
 - ✅ 依赖**按需拉取**：CLI 本体仅几 MB，转换后端按需安装
 - ✅ 支持 `--auto-install` 自动安装缺失依赖
@@ -54,10 +54,14 @@ docker run --rm -v $(pwd):/workspace model-translator list
 | `tensorrt` | TensorRT | `.engine` `.trt` | NVIDIA 推理引擎 |
 | `coreml` | CoreML | `.mlmodel` `.mlpackage` | Apple CoreML |
 | `ggml` | GGUF | `.gguf` `.bin` | 大语言模型量化格式 |
+| `safetensors` | Safetensors | `.safetensors` | HuggingFace 安全权重（GGUF 转换的源） |
 | `mindspore` | MindSpore | `.ckpt` `.mindir` | 华为 MindSpore 模型 |
 
 > 用 `uv run model-translator info <path>` 可检测任意文件的格式，并给出**判定依据**
-> （魔数 / zip 结构 / 目录标志文件 / 扩展名兜底），便于核对识别是否正确。
+> （魔数 / zip 结构 / 头部结构 / 目录标志文件 / 扩展名兜底），便于核对识别是否正确。
+>
+> 共 **12** 种格式，但转换边只有 **11** 条：并非任意两种格式之间都能互转，
+> 可达组合以 `uv run model-translator list` 的"支持的转换路径"一节为准。
 
 ### 四、支持的转换路径
 
@@ -75,6 +79,10 @@ docker run --rm -v $(pwd):/workspace model-translator list
 | CoreML | ONNX | coremltools | coremltools 7+ 转 ONNX |
 | safetensors | GGUF | llama.cpp | `convert_hf_to_gguf.py` |
 
+> 12 种格式的两两组合有 66 种可能，其中**只有上表 11 条**被声明并注册。
+> 未列出的组合（如 ONNX→TFLite、PyTorch→OpenVINO）会直接报"不支持的转换"，
+> 不会按扩展名猜测乱跑。查全部可达路径：`uv run model-translator list`。
+
 ### 五、部署目标（格式 × 部署目标）
 
 `model-translator list --target <key>` 查看单个目标的入口、工具链、获取方式与实测状态。
@@ -84,12 +92,17 @@ docker run --rm -v $(pwd):/workspace model-translator list
 | `rknn` | Rockchip RKNN | 瑞芯微 | rknn-toolkit2 | ONNX | 官方 wheel（不在 PyPI，仅 x86 Linux） | **未实测** |
 | `om` | Ascend OM | 华为昇腾 | `atc`（CANN） | ONNX | 安装 CANN Toolkit，`$ASCEND_HOME/bin` 入 PATH | **未实测** |
 | `dlc` | Cambricon DLC | 寒武纪 | `cnmodel`（CNToolkit） | ONNX | 安装 CNToolkit，bin 入 PATH | **未实测** |
-| `bin` | Horizon BPU bin | 地平线 | `hb_mapper`（OpenExplorer） | ONNX | 安装 OpenExplorer（horizon_tc） | **未实测** |
+| `bin` | Horizon BPU bin（地平线 Journey） | 地平线 | `hb_mapper`（OpenExplorer） | ONNX | 安装 OpenExplorer（horizon_tc） | **未实测** |
 | `mlpackage` | CoreML mlpackage（Apple ANE） | Apple | coremltools | ONNX | `uv sync --extra coreml` | **未实测**（复用 onnx→coreml 同一实现） |
 
 **为什么标"未实测"**：本仓库的开发环境（Windows）没有 CANN / rknn-toolkit2 /
 CNToolkit / OpenExplorer，这些路径**从未在本仓库里跑通**。代码按各厂商公开文档
 构造参数，`list` 与 `convert` 的输出会显式标注，不暗示可用性。请在目标环境自行实跑。
+
+> 5 个目标的 `verified` 全部为 `False`，而且这不是"文档口头承诺"：`tests/test_registry.py`
+> 里的 `test_no_target_claims_verified` 会断言"任何目标都不得声称已实测"，
+> 谁把 `verified` 改成 `True` 而无实跑证据，CI 立刻变红。这条断言是论文里可复现的
+> 诚实性指标，不是为了好看。
 
 **路由规则**：源格式若有到该目标的直连路径则走直连；否则先转中间格式（默认 ONNX）
 再落目标。例如 `pytorch -> rknn` 会拆成两步，中间产物命名为
@@ -151,6 +164,7 @@ uv run model-translator convert <src> <dst> [选项]
 | `--fp16` | TensorRT 使用 FP16 |
 | `--quantize int8` | TFLite 量化方式 |
 | `--script <path>` | 自定义 Python 脚本（定义 `load_model(path)` 返回模型），用于加载 PyTorch state_dict |
+| `--allow-pickle` | **默认关闭**：允许 pickle 反序列化完整 PyTorch 模型（不安全，仅对可信模型使用；不加此开关时 `torch.load(weights_only=True)` 拒绝 pickle，防止恶意 `.pt` 经 `__reduce__` 执行任意代码） |
 | `--auto-install` | 缺依赖时自动按需安装（`uv sync --extra <所需分组>`） |
 | `--opt KEY=VALUE` | 部署目标工具链的透传参数，可重复（见第五节示例） |
 | `--dry-run` | 只打印路由、实现与产物路径，不执行任何转换 |
@@ -276,7 +290,7 @@ ModelTranslator/
 ```bash
 uv sync --extra dev           # 装 pytest（不含任何转换后端）
 uv run model-translator list
-uv run pytest -q              # 与 CI 的 python-test.yml 完全一致
+uv run pytest -q              # pytest 部分与 CI 的 python-test.yml 一致；CI 另有 list 矩阵校验步骤
 ```
 
 添加新格式/转换路径的步骤：
@@ -287,7 +301,8 @@ uv run pytest -q              # 与 CI 的 python-test.yml 完全一致
 4. 新增部署目标：在 `registry.py` 用 `register_target(...)` 登记（务必如实设置 `verified`），
    并在 `src/model_translator/converters/targets.py` 实现参数构造（`build_*` 纯函数，
    可单测）+ 执行函数，最后在 `register_targets()` 里 `register_target_path(...)`
-5. 为新增行为补测试，本地跑 `uv run pytest`（CI 的 `python-test.yml` 会跑同一命令）
+5. 为新增行为补测试，本地跑 `uv run pytest`（CI 的 `python-test.yml` 跑同一 pytest 命令，
+   并额外校验 `list` 输出的 格式 × 部署目标 矩阵，5 个目标 key 必须都在输出里）
 
 ### 十一、测试
 
@@ -297,13 +312,17 @@ uv run pytest -q
 ```
 
 测试分为注册表/探测逻辑与厂商工具链的**参数构造**两类，都不导入 torch/tensorflow
-或任何 NPU SDK，因此在 CI 上不需要装重后端：
+或任何 NPU SDK，因此在 CI 上不需要装重后端。**当前 53 个用例全部通过**
+（`53 passed`，实测于本仓库当前版本 v1.0.20261123）。
 
 - `detect_format` 冲突构造：魔数（GGUF `GGUF`、TFLite `TFL3`）、zip 内容结构
   （TorchScript `code/*.py`、PyTorch `data.pkl`、Keras `metadata.json`+`config.json`）、
+  safetensors 头部结构（8 字节小端长度 + 紧随的 JSON 元数据对象）、
   目录标志文件（`saved_model.pb`、`Manifest.json`）
 - 目标矩阵与路由：5 个目标全部注册、`verified` 不得为真、每个目标有 `install_hint`、
-  直连/两步路由、无路由返回 `None`
+  直连/两步路由、无路由返回 `None`。其中 `test_no_target_claims_verified`
+  断言"任何目标都不得声称已实测"——5 个 NPU/ANE 目标的 `verified=False` 由测试
+  **强制锁定**，没有实跑证据就不许虚报；这是论文里可直接引用的可度量指标。
 - 参数构造：`atc` 剥 `.om` 后缀且 `--framework=5`、缺 `soc_version` 报错、
   rknn 无校准集时关闭量化、`cnmodel`/`hb_mapper` 参数、`trtexec` 的 shapes 三档
 - CLI：`list` 输出含全部目标、`--target` 未知目标退出码 2、无路由退出码 2、

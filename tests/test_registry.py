@@ -74,8 +74,11 @@ def test_find_conversion():
     assert find_conversion("tensorflow", "onnx") is not None
     assert find_conversion("keras", "onnx") is not None
     assert find_conversion("coreml", "onnx") is not None
+    assert find_conversion("safetensors", "ggml") is not None
     # 不支持的路径
     assert find_conversion("pytorch", "tflite") is None
+    assert find_conversion("onnx", "tflite") is None
+    assert find_conversion("pytorch", "openvino") is None
 
 
 def test_list_conversions_nonempty():
@@ -240,6 +243,30 @@ def test_detect_zip_without_markers_falls_back_to_extension(tmp_path):
     with zipfile.ZipFile(p, "w") as zf:
         zf.writestr("whatever.txt", "x")
     assert detect_format(p) == "pytorch"
+
+
+def test_detect_safetensors_by_header(tmp_path):
+    """safetensors 没有魔数：8 字节小端元数据长度 + 紧随的 JSON 对象。"""
+    header = b'{"w":{"dtype":"F32","shape":[2],"data_offsets":[0,8]}}'
+    p = _write(tmp_path / "weights.safetensors",
+               len(header).to_bytes(8, "little") + header + b"\x00" * 8)
+    key, reason = detect_format_with_reason(p)
+    assert key == "safetensors"
+    assert "JSON" in reason
+
+
+def test_detect_safetensors_shape_but_wrong_extension(tmp_path):
+    """.bin 扩展名会落到 ggml，内容像 safetensors 时必须按内容优先判为 safetensors。"""
+    header = b'{"w":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}'
+    p = _write(tmp_path / "weird.bin",
+               len(header).to_bytes(8, "little") + header + b"\x00" * 4)
+    assert detect_format(p) == "safetensors"
+
+
+def test_detect_plain_bin_still_ggml(tmp_path):
+    """普通 .bin（非 safetensors 头部）仍按扩展名回退，不误判。"""
+    p = _write(tmp_path / "plain.bin", b"\x00" * 32)
+    assert detect_format(p) == "ggml"
 
 
 def test_detect_saved_model_dir(tmp_path):

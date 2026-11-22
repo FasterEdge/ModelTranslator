@@ -51,6 +51,7 @@ KEY_ALIASES = {
     "coreml": "coreml",
     "gguf": "ggml",
     "ggml": "ggml",
+    "safetensors": "safetensors",
 }
 
 # 部署目标 key 别名

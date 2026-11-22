@@ -742,7 +742,7 @@ wheels = [
 
 [[package]]
 name = "model-translator"
-version = "1.0.20261116"
+version = "1.0.20261123"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

@@ -1,0 +1,47 @@
+name: 'Python 测试'
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: 'model-translator-test-${{ github.workflow }}-${{ github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: 'uv run pytest'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: '安装 uv'
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      # 只装 dev 分组（pytest），不拉 torch/tensorflow 等重后端：
+      # 测试全部是注册表 / 探测 / 参数构造的纯逻辑，不实例化真模型。
+      - name: '同步依赖（dev 分组）'
+        run: uv sync --extra dev
+
+      - name: '运行 pytest'
+        run: uv run pytest -q
+
+      # list 是验收条件之一：矩阵输出坏了要挡住，不能只靠单测断言
+      - name: '校验 list 输出格式 x 部署目标矩阵'
+        run: |
+          set -euo pipefail
+          out="$(uv run model-translator list)"
+          echo "$out"
+          for key in rknn om dlc bin mlpackage; do
+            if ! grep -q "\b$key\b" <<<"$out"; then
+              echo "::error::list 输出缺少部署目标 $key"
+              exit 1
+            fi
+          done

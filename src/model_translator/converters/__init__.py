@@ -9,6 +9,10 @@
 - 每个函数签名为 convert_xxx(src: Path, dst: Path, **kwargs) -> Path
 - 库缺失时抛出 MissingDependencyError，提示用户安装对应 optional 依赖
 - 输出目录若不存在会自动创建
+- kwargs["opts"] 是 CLI `--opt k=v` 折叠出的字典，厂商工具链专用参数走它，
+  这样新增参数不必改动注册表与函数签名
+
+部署目标（NPU / 专用后端）的转换器在 `targets.py`。
 """
 
 from __future__ import annotations
@@ -75,6 +79,14 @@ def _normalize_input_shape(raw) -> tuple[int, ...] | None:
     if not parts or any(n <= 0 for n in parts):
         raise ConversionError(f"无效的 input_shape: {raw!r} (维度必须为正整数)")
     return parts
+
+
+def _run_tool(args: list[str], label: str) -> None:
+    """跑外部工具并把非 0 退出码收敛为 ConversionError（见 targets._run_tool）。"""
+    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        tail = (result.stderr or result.stdout or "")[-2000:]
+        raise ConversionError(f"{label} 失败: {tail}")
 
 
 # ================= PyTorch -> ONNX / TorchScript =================
@@ -177,22 +189,32 @@ def convert_onnx_to_coreml(src: Path, dst: Path, **kwargs) -> Path:
     return dst
 
 
+def build_trtexec_args(src: Path, dst: Path, **kwargs) -> list[str]:
+    """构造 trtexec 参数（纯函数，便于单测）。"""
+    args = [f"--onnx={src}", f"--saveEngine={dst}"]
+    if kwargs.get("fp16"):
+        args.append("--fp16")
+    if kwargs.get("int8"):
+        args.append("--int8")
+    if kwargs.get("input_shape"):
+        shape = "x".join(str(n) for n in _normalize_input_shape(kwargs["input_shape"]) or ())
+        if shape:
+            args.append(f"--minShapes=input:{shape}")
+            args.append(f"--optShapes=input:{shape}")
+            args.append(f"--maxShapes=input:{shape}")
+    return args
+
+
 def convert_onnx_to_tensorrt(src: Path, dst: Path, **kwargs) -> Path:
     """ONNX -> TensorRT，调用系统 trtexec 工具。"""
+    args = build_trtexec_args(src, dst, **kwargs)
     _ensure_parent(dst)
     trtexec = shutil.which("trtexec") or shutil.which("trtexec.exe")
     if not trtexec:
         raise MissingDependencyError(
             "未找到 trtexec，请安装 TensorRT（NVIDIA 官方）并加入 PATH"
         )
-    cmd = [trtexec, f"--onnx={src}", f"--saveEngine={dst}"]
-    if kwargs.get("fp16"):
-        cmd.append("--fp16")
-    if kwargs.get("int8"):
-        cmd.append("--int8")
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        raise ConversionError(f"trtexec 失败: {result.stderr[-2000:]}")
+    _run_tool([trtexec, *args], "trtexec")
     return dst
 
 
@@ -266,6 +288,8 @@ def convert_safetensors_to_gguf(src: Path, dst: Path, **kwargs) -> Path:
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise ConversionError(f"GGUF 转换失败: {result.stderr[-2000:]}")
+    if not dst.exists():
+        raise ConversionError(f"convert_hf_to_gguf.py 退出码为 0 但未生成 {dst}")
     return dst
 
 
@@ -301,3 +325,7 @@ def register_all(reg) -> None:
                             requires=("coreml",), description="CoreML -> ONNX")
     reg.register_conversion("ggml", "ggml", convert_safetensors_to_gguf,
                             requires=(), description="safetensors -> GGUF (llama.cpp)")
+
+    # 部署目标（NPU / 专用后端）路径声明
+    from .targets import register_targets
+    register_targets(reg)

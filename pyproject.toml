@@ -29,6 +29,10 @@ openvino = [
 coreml = [
     "coremltools>=9.0",
 ]
+# 开发/测试：uv sync --extra dev（不涉及任何转换后端）
+dev = [
+    "pytest>=8.0",
+]
 all = [
     "torch>=2.15.0",
     "onnx>=1.23.2",
